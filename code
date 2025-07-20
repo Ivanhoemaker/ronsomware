@@ -1,0 +1,816 @@
+import os
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext, filedialog
+from cryptography.fernet import Fernet
+import threading
+import time
+import random
+import hashlib
+from datetime import datetime
+
+class CyberRangePro:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Cyber Range  v4.0")
+        self.root.geometry("800x700")
+        
+        # Security parameters
+        self.key = None
+        self.cipher = None
+        self.target_extensions = ['.py', '.txt', '.csv', '.docx', '.xlsx']
+        self.simulation_active = False
+        self.test_files = []
+        self.encryption_log = []
+        self.simulation_mode = "Demo"  # Demo/Drill/Assessment
+        self.operation_mode = "Simulated"  # Simulated/Real
+        
+        # GUI Setup
+        self.setup_gui()
+        self.create_menu()
+        self.create_toolbar()
+        
+        # Initialize logger
+        self.setup_logging()
+        
+    def setup_gui(self):
+        # Configure style
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TFrame', background='#f5f5f5')
+        style.configure('TButton', font=('Segoe UI', 10), padding=5)
+        style.configure('Title.TLabel', font=('Segoe UI', 14, 'bold'), foreground='#2c3e50')
+        style.configure('Status.TLabel', font=('Segoe UI', 8), foreground='#7f8c8d')
+        style.configure('Warning.TLabel', foreground='red')
+        
+        # Main container
+        main_frame = ttk.Frame(self.root, padding="15")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Header
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0,15))
+        
+        ttk.Label(header_frame, 
+                 text="CYBER RANGE  v4.0", 
+                 style='Title.TLabel').pack()
+        
+        self.status_label = ttk.Label(header_frame, 
+                                    text="Status: Ready",
+                                    style='Status.TLabel')
+        self.status_label.pack()
+        
+        # Control panel
+        control_frame = ttk.LabelFrame(main_frame, text="Simulation Controls", padding=10)
+        control_frame.pack(fill=tk.X, pady=5)
+        
+        # Mode selector
+        mode_frame = ttk.Frame(control_frame)
+        mode_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(mode_frame, text="Training Mode:").pack(side=tk.LEFT)
+        self.mode_var = tk.StringVar(value="Demo")
+        modes = [("Demo", "Demo"), ("Drill", "Drill"), ("Assessment", "Assessment")]
+        for text, mode in modes:
+            ttk.Radiobutton(mode_frame, text=text, variable=self.mode_var, 
+                           value=mode).pack(side=tk.LEFT, padx=5)
+            
+        # Operation mode selector
+        op_mode_frame = ttk.Frame(control_frame)
+        op_mode_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Label(op_mode_frame, text="Operation Mode:").pack(side=tk.LEFT)
+        self.op_mode_var = tk.StringVar(value="Simulated")
+        ttk.Radiobutton(op_mode_frame, text="Simulated", variable=self.op_mode_var, 
+                       value="Simulated").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(op_mode_frame, text="Real", variable=self.op_mode_var, 
+                       value="Real").pack(side=tk.LEFT, padx=5)
+        
+        # File selection
+        file_frame = ttk.Frame(control_frame)
+        file_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(file_frame, 
+                  text="Select Target Files", 
+                  command=self.select_files).pack(side=tk.LEFT, padx=5)
+        
+        self.file_count_label = ttk.Label(file_frame, text="0 files selected")
+        self.file_count_label.pack(side=tk.LEFT, padx=5)
+        
+        # Action buttons
+        action_frame = ttk.Frame(control_frame)
+        action_frame.pack(fill=tk.X, pady=5)
+        
+        ttk.Button(action_frame, 
+                  text="Simulate Attack", 
+                  command=self.start_simulation,
+                  style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(action_frame, 
+                  text="Simulate Recovery", 
+                  command=self.show_decrypt_dialog).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(action_frame, 
+                  text="Generate Report", 
+                  command=self.generate_report).pack(side=tk.LEFT, padx=5)
+        
+        # Progress bar
+        self.progress = ttk.Progressbar(main_frame, orient=tk.HORIZONTAL, length=100, mode='determinate')
+        self.progress.pack(fill=tk.X, pady=10)
+        
+        # Console with tabs
+        notebook = ttk.Notebook(main_frame)
+        
+        # Event log tab
+        log_frame = ttk.Frame(notebook)
+        self.console = scrolledtext.ScrolledText(log_frame, height=15, wrap=tk.WORD)
+        self.console.pack(fill=tk.BOTH, expand=True)
+        notebook.add(log_frame, text="Event Log")
+        
+        # File list tab
+        filelist_frame = ttk.Frame(notebook)
+        self.file_list = tk.Listbox(filelist_frame)
+        self.file_list.pack(fill=tk.BOTH, expand=True)
+        notebook.add(filelist_frame, text="Target Files")
+        
+        # Key display tab
+        key_frame = ttk.Frame(notebook)
+        self.key_display = scrolledtext.ScrolledText(key_frame, height=8, wrap=tk.WORD)
+        self.key_display.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        notebook.add(key_frame, text="Encryption Key")
+        
+        notebook.pack(fill=tk.BOTH, expand=True)
+        
+        # Configure console tags
+        self.console.tag_config('success', foreground='#27ae60')
+        self.console.tag_config('error', foreground='#e74c3c')
+        self.console.tag_config('warning', foreground='#f39c12')
+        self.console.tag_config('debug', foreground='#3498db')
+        self.console.tag_config('critical', foreground='#c0392b', font=('Segoe UI', 9, 'bold'))
+        
+        # Footer
+        self.footer_label = ttk.Label(main_frame, 
+                 text="This is a training tool. No files are actually modified.",
+                 style='Status.TLabel')
+        self.footer_label.pack(side=tk.BOTTOM)
+        
+        # Bind operation mode change to update footer
+        self.op_mode_var.trace_add('write', self.update_footer)
+    
+    def update_footer(self, *args):
+        if self.op_mode_var.get() == "Real":
+            self.footer_label.config(text="WARNING: Real encryption mode enabled. Files will be permanently modified!",
+                                   style='Warning.TLabel')
+        else:
+            self.footer_label.config(text="This is a training tool. No files are actually modified.",
+                                   style='Status.TLabel')
+    
+    def create_menu(self):
+        menubar = tk.Menu(self.root)
+        
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="New Scenario", command=self.new_scenario)
+        file_menu.add_command(label="Save Log", command=self.save_log)
+        file_menu.add_separator()
+        file_menu.add_command(label="Save Key", command=self.save_key)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        # Training menu
+        train_menu = tk.Menu(menubar, tearoff=0)
+        train_menu.add_command(label="Incident Response", command=self.show_incident_response)
+        train_menu.add_command(label="Forensics", command=self.show_forensics)
+        menubar.add_cascade(label="Training", menu=train_menu)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="User Guide", command=self.show_guide)
+        help_menu.add_command(label="About", command=self.show_about)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        
+        self.root.config(menu=menubar)
+    
+    def save_key(self):
+        if not self.key:
+            messagebox.showinfo("Info", "No encryption key available")
+            return
+            
+        key_path = filedialog.asksaveasfilename(
+            defaultextension=".key",
+            filetypes=[("Key Files", "*.key"), ("Text Files", "*.txt")],
+            title="Save Encryption Key"
+        )
+        
+        if key_path:
+            try:
+                with open(key_path, 'w') as f:
+                    f.write(self.key.decode())
+                self.log_event(f"Encryption key saved to {key_path}", 'success')
+                messagebox.showinfo("Success", f"Key saved to:\n{key_path}")
+            except Exception as e:
+                self.log_event(f"Failed to save key: {str(e)}", 'error')
+    
+    def create_toolbar(self):
+        toolbar = ttk.Frame(self.root, relief=tk.RAISED)
+        
+        icons = [
+            ("📁", self.select_files),
+            ("🔒", self.start_simulation),
+            ("🔓", self.show_decrypt_dialog),
+            ("📊", self.generate_report),
+            ("🔑", self.save_key),
+            ("🛡️", self.show_incident_response)
+        ]
+        
+        for icon, cmd in icons:
+            btn = ttk.Button(toolbar, text=icon, command=cmd, style='Toolbutton.TButton')
+            btn.pack(side=tk.LEFT, padx=2, pady=2)
+        
+        toolbar.pack(fill=tk.X)
+    
+    def setup_logging(self):
+        self.log_file = f"training_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        self.log_event("System initialized", 'debug')
+        self.log_event("Training mode: Demo", 'debug')
+    
+    def log_event(self, message, msg_type='info'):
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        log_msg = f"[{timestamp}] {message}"
+        
+        self.console.config(state=tk.NORMAL)
+        self.console.insert(tk.END, log_msg + "\n")
+        
+        if msg_type != 'info':
+            self.console.tag_add(msg_type, 'end-2c linestart', 'end-2c lineend')
+            
+        self.console.see(tk.END)
+        self.console.config(state=tk.DISABLED)
+        
+        # Update status label for important events
+        if msg_type in ('error', 'critical', 'success'):
+            self.status_label.config(text=f"Status: {message[:50]}...")
+    
+    def select_files(self):
+        initial_dir = os.path.expanduser("~/Documents")
+        files = filedialog.askopenfilenames(
+            title="Select files for simulation",
+            initialdir=initial_dir,
+            filetypes=[
+                ("Documents", "*.docx"),
+                ("Spreadsheets", "*.xlsx"),
+                ("Text files", "*.txt"),
+                ("Python files", "*.py"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if files:
+            self.test_files = list(files)
+            self.file_count_label.config(text=f"{len(files)} files selected")
+            self.file_list.delete(0, tk.END)
+            for f in files:
+                self.file_list.insert(tk.END, os.path.basename(f))
+            self.log_event(f"Selected {len(files)} files for simulation", 'success')
+            self.update_progress(0)
+        else:
+            self.log_event("File selection cancelled", 'warning')
+    
+    def start_simulation(self):
+        if not self.test_files:
+            messagebox.showwarning("Warning", "Please select files first")
+            return
+            
+        if self.simulation_active:
+            messagebox.showwarning("Warning", "Simulation already running")
+            return
+            
+        # Confirm based on mode
+        mode = self.mode_var.get()
+        op_mode = self.op_mode_var.get()
+        
+        if op_mode == "Real":
+            if not messagebox.askyesno(
+                "WARNING: REAL ENCRYPTION",
+                "WARNING: In REAL mode, the selected files will be ACTUALLY encrypted.\n\n"
+                "This means you will lose access to the original content unless you have a backup and can decrypt.\n\n"
+                "Are you absolutely sure you want to proceed?",
+                icon='warning'
+            ):
+                return
+        else:
+            if mode == "Assessment":
+                if not messagebox.askyesno(
+                    "Assessment Mode",
+                    "This will simulate a timed ransomware attack.\n"
+                    "You will need to respond appropriately.\n\n"
+                    "Begin assessment?"):
+                    return
+                timeout = 300  # 5 minutes
+            else:
+                if not messagebox.askyesno(
+                    "Confirmation",
+                    "This will simulate a ransomware attack.\n"
+                    "No actual files will be modified.\n\n"
+                    "Continue?"):
+                    return
+                timeout = 0
+        
+        self.simulation_active = True
+        self.key = Fernet.generate_key()
+        self.cipher = Fernet(self.key)
+        
+        # Display key in key tab
+        self.key_display.config(state=tk.NORMAL)
+        self.key_display.delete(1.0, tk.END)
+        self.key_display.insert(tk.END, self.key.decode())
+        self.key_display.config(state=tk.DISABLED)
+        
+        self.log_event(f"=== STARTING {mode.upper()} MODE ({op_mode.upper()}) ===", 'warning')
+        self.log_event(f"Generated encryption key: {self.key.decode()}")
+        
+        # Run in background thread
+        sim_thread = threading.Thread(target=self.run_simulation, args=(mode, op_mode), daemon=True)
+        sim_thread.start()
+        
+        if mode == "Assessment" and op_mode == "Simulated":
+            self.root.after(timeout*1000, self.assessment_timeout)
+    
+    def assessment_timeout(self):
+        if self.simulation_active:
+            self.log_event("TIME EXPIRED in assessment mode!", 'critical')
+            messagebox.showwarning("Time Expired", "Assessment time has expired!")
+            self.simulation_active = False
+    
+    def run_simulation(self, mode, op_mode):
+        total_files = len(self.test_files)
+        processed = 0
+        start_time = time.time()
+        
+        try:
+            # Simulate discovery phase
+            self.log_event("Scanning file system...", 'debug')
+            time.sleep(1)
+            
+            # Simulate C2 communication
+            self.log_event("Establishing command channel...", 'debug')
+            time.sleep(0.5)
+            
+            for file_path in self.test_files:
+                if not os.path.exists(file_path):
+                    self.log_event(f"File not found: {file_path}", 'error')
+                    continue
+                
+                # Vary speed based on mode
+                if mode == "Demo":
+                    delay = random.uniform(0.1, 0.3)
+                elif mode == "Drill":
+                    delay = random.uniform(0.05, 0.15)
+                else:  # Assessment
+                    delay = random.uniform(0.02, 0.1)
+                
+                time.sleep(delay)
+                
+                # Simulate or perform actual encryption
+                file_stats = os.stat(file_path)
+                
+                if op_mode == "Real":
+                    # REAL ENCRYPTION
+                    try:
+                        with open(file_path, 'rb') as f:
+                            data = f.read()
+                        encrypted = self.cipher.encrypt(data)
+                        with open(file_path, 'wb') as f:
+                            f.write(encrypted)
+                        status = 'encrypted'
+                        self.log_event(f"[REAL] Encrypted: {os.path.basename(file_path)}", 'critical')
+                    except Exception as e:
+                        self.log_event(f"Error encrypting {file_path}: {str(e)}", 'error')
+                        status = 'encryption_failed'
+                else:
+                    # Simulated encryption
+                    status = 'simulated_encrypted'
+                    self.log_event(f"[SIMULATED] Encrypted: {os.path.basename(file_path)}")
+                
+                sim_result = {
+                    'path': file_path,
+                    'size': file_stats.st_size,
+                    'status': status,
+                    'time': time.time()
+                }
+                self.encryption_log.append(sim_result)
+                
+                processed += 1
+                progress = int((processed / total_files) * 100)
+                self.update_progress(progress)
+            
+            # Create training artifacts
+            self.create_training_artifacts(mode, op_mode)
+            
+            elapsed = time.time() - start_time
+            self.log_event(f"=== SIMULATION COMPLETE ===", 'success')
+            self.log_event(f"Processed {processed} files in {elapsed:.2f} seconds")
+            self.update_progress(100)
+            
+        except Exception as e:
+            self.log_event(f"Simulation error: {str(e)}", 'error')
+        finally:
+            self.simulation_active = False
+    
+    def create_training_artifacts(self, mode, op_mode):
+        # Create simulated ransom note
+        note_path = os.path.join(os.getcwd(), "SIMULATED_RANSOM_NOTE.txt")
+        with open(note_path, 'w') as f:
+            f.write(f"""=== CYBER RANGE SIMULATION ===
+            
+Mode: {mode} | Operation: {op_mode}
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Your files have been {'ACTUALLY' if op_mode == 'Real' else 'SIMULATED to be'} encrypted.
+
+Recovery Key: {self.key.decode()}
+
+Next Steps:
+1. Document the incident
+2. Identify affected systems
+3. Contain the spread
+4. Begin recovery using the decryption tool
+            """)
+        
+        self.log_event(f"Created training artifact: {note_path}")
+        
+        # Create log file
+        log_path = os.path.join(os.getcwd(), "simulation_log.json")
+        with open(log_path, 'w') as f:
+            import json
+            json.dump({
+                'mode': mode,
+                'operation': op_mode,
+                'timestamp': str(datetime.now()),
+                'key': self.key.decode(),
+                'files': self.encryption_log
+            }, f, indent=2)
+        
+        self.log_event(f"Created simulation log: {log_path}")
+    
+    def update_progress(self, value):
+        self.progress['value'] = value
+        self.root.update_idletasks()
+    
+    def show_decrypt_dialog(self):
+        if not hasattr(self, 'cipher') or self.cipher is None:
+            messagebox.showinfo("Info", "Run simulation first to get a key")
+            return
+            
+        decrypt_win = tk.Toplevel(self.root)
+        decrypt_win.title("Incident Recovery Tool")
+        decrypt_win.geometry("600x400")
+        
+        # Header
+        ttk.Label(decrypt_win, 
+                 text="Ransomware Recovery Procedure",
+                 style='Title.TLabel').pack(pady=10)
+        
+        # Key entry
+        key_frame = ttk.Frame(decrypt_win)
+        key_frame.pack(pady=10, fill=tk.X, padx=10)
+        
+        ttk.Label(key_frame, text="Decryption Key:").pack(side=tk.LEFT)
+        self.key_entry = ttk.Entry(key_frame, width=60)
+        self.key_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Key from simulation
+        if hasattr(self, 'key') and self.key:
+            key_frame = ttk.Frame(decrypt_win)
+            key_frame.pack(fill=tk.X, padx=10)
+            
+            ttk.Label(key_frame, 
+                     text="Simulation Key:",
+                     font=('Segoe UI', 8)).pack(side=tk.LEFT)
+            
+            ttk.Label(key_frame, 
+                     text=self.key.decode(),
+                     font=('Consolas', 8),
+                     foreground="blue").pack(side=tk.LEFT, padx=5)
+        
+        # Recovery options
+        options_frame = ttk.LabelFrame(decrypt_win, text="Recovery Options", padding=10)
+        options_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        ttk.Button(options_frame, 
+                  text="Validate Key", 
+                  command=self.validate_key).pack(pady=5)
+        
+        ttk.Button(options_frame, 
+                  text=f"{'Real' if self.op_mode_var.get() == 'Real' else 'Simulate'} Decryption", 
+                  command=self.start_decryption).pack(pady=5)
+        
+        ttk.Button(options_frame, 
+                  text="Incident Report", 
+                  command=self.generate_report).pack(pady=5)
+        
+        # Training notes
+        notes_frame = ttk.Frame(decrypt_win)
+        notes_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Label(notes_frame, 
+                 text="Training Notes:\n1. Verify key before decryption\n2. Document all recovery steps\n3. Preserve evidence",
+                 justify=tk.LEFT).pack(anchor=tk.W)
+    
+    def validate_key(self):
+        key = self.key_entry.get().strip()
+        if not key:
+            messagebox.showerror("Error", "Please enter a decryption key")
+            return
+            
+        try:
+            Fernet(key.encode())  # Test if key is valid
+            messagebox.showinfo("Success", "Key format is valid")
+            self.log_event("Decryption key validated", 'success')
+        except:
+            messagebox.showerror("Error", "Invalid key format")
+            self.log_event("Invalid decryption key entered", 'error')
+    
+    def start_decryption(self):
+        key = self.key_entry.get().strip()
+        if not key:
+            messagebox.showerror("Error", "Please enter a decryption key")
+            return
+            
+        try:
+            cipher = Fernet(key.encode())
+        except:
+            messagebox.showerror("Error", "Invalid key format")
+            return
+            
+        # Run in background thread
+        threading.Thread(
+            target=self.perform_decryption,
+            args=(cipher,),
+            daemon=True
+        ).start()
+    
+    def perform_decryption(self, cipher):
+        op_mode = self.op_mode_var.get()
+        self.log_event(f"=== STARTING {'REAL' if op_mode == 'Real' else 'SIMULATED'} RECOVERY ===", 'success')
+        total_files = len(self.test_files)
+        processed = 0
+        start_time = time.time()
+        
+        try:
+            # Simulate recovery preparation
+            self.log_event("Initializing recovery environment...", 'debug')
+            time.sleep(1)
+            
+            for file_path in self.test_files:
+                if not os.path.exists(file_path):
+                    self.log_event(f"File not found: {file_path}", 'error')
+                    continue
+                
+                if op_mode == "Real":
+                    # REAL DECRYPTION
+                    try:
+                        with open(file_path, 'rb') as f:
+                            data = f.read()
+                        decrypted = cipher.decrypt(data)
+                        with open(file_path, 'wb') as f:
+                            f.write(decrypted)
+                        status = 'decrypted'
+                        self.log_event(f"[REAL] Decrypted: {os.path.basename(file_path)}", 'success')
+                    except Exception as e:
+                        self.log_event(f"Error decrypting {file_path}: {str(e)}", 'error')
+                        status = 'decryption_failed'
+                else:
+                    # Simulated decryption
+                    time.sleep(random.uniform(0.1, 0.3))
+                    status = 'simulated_decrypted'
+                    self.log_event(f"[SIMULATED] Decrypted: {os.path.basename(file_path)}")
+                
+                # Update log
+                for entry in self.encryption_log:
+                    if entry['path'] == file_path:
+                        entry['status'] = status
+                        entry['recovery_time'] = time.time()
+                        break
+                
+                processed += 1
+                progress = int((processed / total_files) * 100)
+                self.update_progress(progress)
+            
+            elapsed = time.time() - start_time
+            self.log_event(f"=== RECOVERY COMPLETE ===", 'success')
+            self.log_event(f"Recovered {processed} files in {elapsed:.2f} seconds")
+            
+            # Generate recovery report
+            self.generate_report()
+            
+            messagebox.showinfo("Success", "Recovery operation completed")
+            
+        except Exception as e:
+            self.log_event(f"Recovery error: {str(e)}", 'error')
+            messagebox.showerror("Error", f"Recovery failed: {str(e)}")
+    
+    def generate_report(self):
+        report_path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Text Files", "*.txt"), ("All Files", "*.*")],
+            title="Save Incident Report"
+        )
+        
+        if not report_path:
+            return
+            
+        try:
+            with open(report_path, 'w') as f:
+                f.write(f"""=== CYBER INCIDENT REPORT ===
+                
+Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                
+Simulation Mode: {self.mode_var.get()}
+Operation Mode: {self.op_mode_var.get()}
+Encryption Key: {self.key.decode() if hasattr(self, 'key') else 'N/A'}
+                
+Affected Files: {len(self.test_files)}
+                
+Timeline:
+""")
+                
+                for entry in self.encryption_log:
+                    status = entry.get('status', 'unknown')
+                    f.write(f"- {status.capitalize()}: {os.path.basename(entry['path'])} ")
+                    f.write(f"(Size: {entry['size']} bytes)\n")
+                
+                f.write("\nResponse Actions:\n1. [Describe containment steps]\n")
+                f.write("2. [Describe eradication steps]\n3. [Describe recovery steps]\n")
+                f.write("\nLessons Learned:\n[Add observations here]\n")
+            
+            self.log_event(f"Generated incident report: {report_path}", 'success')
+            messagebox.showinfo("Success", f"Report saved to:\n{report_path}")
+        except Exception as e:
+            self.log_event(f"Failed to generate report: {str(e)}", 'error')
+            messagebox.showerror("Error", f"Report generation failed: {str(e)}")
+    
+    def new_scenario(self):
+        if messagebox.askyesno("New Scenario", "Reset current simulation?"):
+            self.test_files = []
+            self.encryption_log = []
+            self.key = None
+            self.cipher = None
+            self.file_count_label.config(text="0 files selected")
+            self.file_list.delete(0, tk.END)
+            self.console.config(state=tk.NORMAL)
+            self.console.delete(1.0, tk.END)
+            self.console.config(state=tk.DISABLED)
+            self.key_display.config(state=tk.NORMAL)
+            self.key_display.delete(1.0, tk.END)
+            self.key_display.config(state=tk.DISABLED)
+            self.update_progress(0)
+            self.log_event("Scenario reset", 'debug')
+    
+    def save_log(self):
+        log_path = filedialog.asksaveasfilename(
+            defaultextension=".log",
+            filetypes=[("Log Files", "*.log"), ("Text Files", "*.txt")],
+            title="Save Event Log"
+        )
+        
+        if log_path:
+            try:
+                with open(log_path, 'w') as f:
+                    f.write(self.console.get(1.0, tk.END))
+                self.log_event(f"Log saved to {log_path}", 'success')
+            except Exception as e:
+                self.log_event(f"Failed to save log: {str(e)}", 'error')
+    
+    def show_incident_response(self):
+        guide = """INCIDENT RESPONSE PROCEDURE
+
+1. Identification:
+   - Detect the ransomware event
+   - Determine scope of infection
+   - Activate incident response team
+
+2. Containment:
+   - Isolate affected systems
+   - Preserve evidence
+   - Implement temporary fixes
+
+3. Eradication:
+   - Remove ransomware artifacts
+   - Patch vulnerabilities
+   - Validate clean systems
+
+4. Recovery:
+   - Restore systems from backups
+   - Verify decryption tools
+   - Monitor for re-infection
+
+5. Lessons Learned:
+   - Document the incident
+   - Update policies/procedures
+   - Conduct training"""
+        
+        self.show_info_window("Incident Response Guide", guide)
+    
+    def show_forensics(self):
+        guide = """DIGITAL FORENSICS TIPS
+
+Evidence Collection:
+- Capture memory dumps
+- Preserve log files
+- Document file system changes
+
+Analysis:
+- Examine ransom note
+- Review process logs
+- Check for suspicious executables
+
+Tools:
+- FTK Imager
+- Volatility (memory analysis)
+- Wireshark (network traffic)
+- Autopsy (disk analysis)"""
+        
+        self.show_info_window("Forensics Guide", guide)
+    
+    def show_info_window(self, title, content):
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.geometry("600x400")
+        
+        text = scrolledtext.ScrolledText(win, wrap=tk.WORD)
+        text.insert(tk.END, content)
+        text.config(state=tk.DISABLED)
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        ttk.Button(win, text="Close", command=win.destroy).pack(pady=5)
+    
+    def show_guide(self):
+        self.show_info_window("User Guide", """CYBER RANGE PROFESSIONAL GUIDE
+
+1. Training Modes:
+   - Demo: Slow-paced demonstration
+   - Drill: Timed practice scenario
+   - Assessment: Evaluated test scenario
+
+2. Operation Modes:
+   - Simulated: Safe demonstration (no file changes)
+   - Real: Actual file encryption/decryption (use with caution)
+
+3. Basic Workflow:
+   a. Select target files
+   b. Choose training and operation modes
+   c. Run simulation
+   d. Practice recovery
+   e. Generate report
+
+4. Key Features:
+   - Safe simulation environment
+   - Real encryption option for advanced training
+   - Comprehensive logging
+   - Incident response tools
+   - Key management""")
+    
+    def show_about(self):
+        about = """CYBER RANGE PROFESSIONAL v4.0
+        
+A comprehensive cybersecurity training tool with:
+- Ransomware simulation
+- Real encryption capabilities
+- Incident response practice
+- Forensic investigation training
+        
+© 2023 Cybersecurity Training Labs"""
+        messagebox.showinfo("About", about)
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    
+    # Show enhanced disclaimer
+    disclaimer = """CYBER RANGE PROFESSIONAL v4.0 - DISCLAIMER
+
+This is a training simulation tool for cybersecurity education.
+
+By using this software, you agree:
+1. You are authorized to conduct security testing
+2. You will not use this for malicious purposes
+3. You understand the risks of REAL encryption mode
+
+WARNING: REAL encryption mode will permanently modify files!
+Only use this mode on non-critical, backed up, or test files.
+
+Click OK to continue or Cancel to exit"""
+    
+    if not messagebox.askyesno("Legal Disclaimer", disclaimer):
+        exit()
+    
+    # Configure high DPI awareness on Windows
+    if os.name == 'nt':
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)
+    
+    app = CyberRangePro(root)
+    root.mainloop()
+
+
+
